@@ -2,8 +2,8 @@
 Multi-Agent E-Commerce Recommendation System — FastAPI Entry Point
 
 Endpoints:
-  POST /api/v1/recommend          - 获取个性化推荐
-  POST /api/v1/recommend/graph    - 通过LangGraph pipeline推荐
+  POST /api/v1/recommend          - LangGraph recommendation pipeline
+  POST /api/v1/behaviors          - record user behavior for FeatureStore
   GET  /api/v1/experiments        - 查看A/B实验状态
   GET  /api/v1/metrics            - 查看系统监控指标
   GET  /health                    - 健康检查
@@ -21,32 +21,69 @@ from typing import Any
 
 import structlog
 import uvicorn
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
+from redis.asyncio import Redis
 
 from config import get_settings
-from models.schemas import RecommendationRequest, RecommendationResponse
-from orchestrator.supervisor import SupervisorOrchestrator
-from orchestrator.graph import build_recommendation_graph
-from services.ab_test import ABTestEngine
+from models.schemas import (
+    BehaviorEventRequest,
+    BehaviorEventResponse,
+    RecommendationRequest,
+    RecommendationResponse,
+)
+from orchestrator.graph import (
+    ab_engine,
+    build_recommendation_graph,
+    configure_feature_store,
+)
+from services.feature_store import FeatureStore
 from services.metrics import MetricsCollector
 
 logger = structlog.get_logger()
 settings = get_settings()
 
 
-ab_engine = ABTestEngine()
 metrics_collector = MetricsCollector()
-supervisor = SupervisorOrchestrator(ab_engine=ab_engine)
 rec_graph = None
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     global rec_graph
+
+    redis_client = Redis.from_url(
+        settings.redis_url,
+        decode_responses=True,
+    )
+
+    try:
+        await redis_client.ping()
+        feature_store = FeatureStore(
+            redis_client=redis_client,
+            ttl=settings.feature_ttl_seconds,
+        )
+        configure_feature_store(feature_store)
+        app.state.redis_client = redis_client
+        app.state.feature_store = feature_store
+        logger.info("feature_store.enabled")
+    except Exception as exc:
+        logger.warning(
+            "feature_store.unavailable",
+            error=str(exc),
+        )
+        configure_feature_store(None)
+        await redis_client.aclose()
+        redis_client = None
+
     rec_graph = build_recommendation_graph()
     logger.info("app.startup", model=settings.llm_model)
     yield
+
+    configure_feature_store(None)
+    if redis_client is not None:
+        await redis_client.aclose()
+
     logger.info("app.shutdown")
 
 
@@ -72,32 +109,37 @@ async def health():
 
 @app.post("/api/v1/recommend", response_model=RecommendationResponse)
 async def recommend(request: RecommendationRequest):
-    """使用Supervisor编排器进行推荐 (生产推荐用法)"""
-    response = await supervisor.recommend(request)
-    _collect_metrics(response)
+    """Run the LangGraph recommendation pipeline."""
+    result = await _run_graph(request)
+    response = _build_response(request, result)
+    _collect_metrics(response.agent_results)
     return response
 
 
-@app.post("/api/v1/recommend/graph")
-async def recommend_via_graph(request: RecommendationRequest):
-    """使用LangGraph状态图进行推荐 (展示LangGraph能力)"""
-    if not rec_graph:
-        return {"error": "Graph not initialized"}
-    state = {
-        "user_id": request.user_id,
-        "scene": request.scene,
-        "num_items": request.num_items,
-        "context": request.context,
-    }
-    result = await rec_graph.ainvoke(state)
-    return {
-        "request_id": result.get("request_id"),
-        "user_id": result.get("user_id"),
-        "products": [p.model_dump() for p in result.get("final_products", [])],
-        "marketing_copies": result.get("marketing_copies", []),
-        "experiment_group": result.get("experiment_group", "control"),
-        "total_latency_ms": round(result.get("total_latency_ms", 0), 1),
-    }
+@app.post("/api/v1/behaviors", response_model=BehaviorEventResponse)
+async def record_behavior(
+    behavior: BehaviorEventRequest,
+    request: Request,
+):
+    """Record a user behavior event into the Redis FeatureStore."""
+    feature_store = getattr(request.app.state, "feature_store", None)
+    if feature_store is None:
+        raise HTTPException(
+            status_code=503,
+            detail="FeatureStore is unavailable",
+        )
+
+    await feature_store.record_behavior(
+        user_id=behavior.user_id,
+        behavior_type=behavior.behavior_type,
+        item_id=behavior.item_id,
+        metadata=behavior.metadata,
+    )
+    return BehaviorEventResponse(
+        user_id=behavior.user_id,
+        behavior_type=behavior.behavior_type,
+        item_id=behavior.item_id,
+    )
 
 
 @app.get("/api/v1/experiments")
@@ -139,8 +181,32 @@ async def record_outcome(experiment_id: str, group: str, success: bool):
     return {"status": "recorded"}
 
 
-def _collect_metrics(response: RecommendationResponse):
-    for name, result in response.agent_results.items():
+async def _run_graph(request: RecommendationRequest):
+    if not rec_graph:
+        raise HTTPException(status_code=503, detail="Graph not initialized")
+    state = {
+        "user_id": request.user_id,
+        "scene": request.scene,
+        "num_items": request.num_items,
+        "context": request.context,
+    }
+    return await rec_graph.ainvoke(state)
+
+
+def _build_response(request: RecommendationRequest, result: dict[str, Any]):
+    return RecommendationResponse(
+        request_id=result.get("request_id", ""),
+        user_id=result.get("user_id", request.user_id),
+        products=result.get("final_products", []),
+        marketing_copies=result.get("marketing_copies", []),
+        experiment_group=result.get("experiment_group", "control"),
+        agent_results=result.get("agent_results", {}),
+        total_latency_ms=round(result.get("total_latency_ms", 0), 1),
+    )
+
+
+def _collect_metrics(agent_results: dict[str, Any]):
+    for name, result in agent_results.items():
         metrics_collector.record_agent_call(
             agent_name=name,
             success=result.success,

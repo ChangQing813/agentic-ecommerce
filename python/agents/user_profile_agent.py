@@ -65,7 +65,7 @@ class UserProfileAgent(BaseAgent):
         ]
         response = await self.llm.ainvoke(messages)
 
-        profile_data = self._parse_profile(user_id, response.content)
+        profile_data = self._parse_profile(user_id, response.content, behavior_data)
 
         return UserProfileResult(
             success=True,
@@ -88,7 +88,12 @@ class UserProfileAgent(BaseAgent):
             "active_hours": context.get("active_hours", [20, 21, 22]),
         }
 
-    def _parse_profile(self, user_id: str, raw: str) -> UserProfile:
+    def _parse_profile(
+        self,
+        user_id: str,
+        raw: str,
+        behavior_data: dict | None = None,
+    ) -> UserProfile:
         try:
             cleaned = raw.strip()
             if cleaned.startswith("```"):
@@ -105,17 +110,34 @@ class UserProfileAgent(BaseAgent):
                 continue
 
         price_range_raw = data.get("price_range", [0, 10000])
-        price_range = (
-            float(price_range_raw[0]),
-            float(price_range_raw[1]) if len(price_range_raw) > 1 else 10000.0,
-        )
+        if not isinstance(price_range_raw, (list, tuple)):
+            price_range_raw = [0, 10000]
+
+        try:
+            price_min = float(price_range_raw[0])
+        except (IndexError, TypeError, ValueError):
+            price_min = 0.0
+
+        try:
+            price_max = float(price_range_raw[1])
+        except (IndexError, TypeError, ValueError):
+            price_max = 10000.0
+
+        if price_min > price_max:
+            price_min, price_max = price_max, price_min
+
+        price_range = (price_min, price_max)
 
         return UserProfile(
             user_id=user_id,
             segments=segments or [UserSegment.ACTIVE],
             preferred_categories=data.get("preferred_categories", []),
             price_range=price_range,
-            rfm_score=data.get("rfm_score", {}),
+            rfm_score=(
+                behavior_data.get("rfm", {})
+                if behavior_data and isinstance(behavior_data.get("rfm"), dict)
+                else data.get("rfm_score", {})
+            ),
             real_time_tags=data.get("real_time_tags", {}),
         )
 

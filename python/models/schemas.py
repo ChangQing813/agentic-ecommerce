@@ -50,6 +50,20 @@ class RecommendationRequest(BaseModel):
     context: dict[str, Any] = Field(default_factory=dict)
 
 
+class BehaviorEventRequest(BaseModel):
+    user_id: str
+    behavior_type: str
+    item_id: str
+    metadata: dict[str, Any] = Field(default_factory=dict)
+
+
+class BehaviorEventResponse(BaseModel):
+    status: str = "recorded"
+    user_id: str
+    behavior_type: str
+    item_id: str
+
+
 class AgentResult(BaseModel):
     agent_name: str
     success: bool = True

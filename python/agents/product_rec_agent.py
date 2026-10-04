@@ -7,14 +7,13 @@
 from __future__ import annotations
 
 import json
-import random
 from typing import Any
 
 from langchain_core.messages import HumanMessage, SystemMessage
 from langchain_openai import ChatOpenAI
 
 from config import get_settings
-from models.schemas import AgentResult, Product, ProductRecResult, UserProfile
+from models.schemas import Product, ProductRecResult, UserProfile
 
 from .base_agent import BaseAgent
 
@@ -72,76 +71,147 @@ class ProductRecAgent(BaseAgent):
         )
 
     async def _execute(self, **kwargs: Any) -> ProductRecResult:
+        operation: str = kwargs["operation"]
+
+        if operation == "recall":
+            limit = int(kwargs["limit"])
+            candidates = self._load_candidates(limit)
+            return ProductRecResult(
+                success=True,
+                products=candidates,
+                recall_strategy="rule_recall",
+                data={"candidate_count": len(candidates), "reranked": 0},
+                confidence=0.8,
+            )
+
+        if operation != "rerank":
+            raise ValueError(
+                f"Unsupported ProductRecAgent operation: {operation}"
+            )
+
         user_profile: UserProfile | None = kwargs.get("user_profile")
+        candidates: list[Product] | None = kwargs.get("candidates")
         num_items: int = kwargs.get("num_items", 10)
 
-        candidates = await self._recall(user_profile, num_items * 3)
-        ranked_ids = await self._rerank(user_profile, candidates, num_items)
+        if candidates is None:
+            raise ValueError("ProductRecAgent.rerank requires candidates")
+        candidates = list(candidates)
+
+        if not candidates:
+            return ProductRecResult(
+                success=True,
+                products=[],
+                recall_strategy="rule_recall",
+                data={"candidate_count": 0, "reranked": 0},
+                confidence=1.0,
+            )
+
+        ranked_ids = await self._rerank(
+            user_profile,
+            candidates,
+            num_items,
+        )
 
         id_to_product = {p.product_id: p for p in candidates}
         final_products = []
+        seen_ids = set()
+
         for pid in ranked_ids:
-            if pid in id_to_product:
+            if pid in id_to_product and pid not in seen_ids:
+                seen_ids.add(pid)
                 final_products.append(id_to_product[pid])
+
         if len(final_products) < num_items:
-            for p in candidates:
-                if p.product_id not in ranked_ids:
-                    final_products.append(p)
+            for product in candidates:
+                if product.product_id not in seen_ids:
+                    seen_ids.add(product.product_id)
+                    final_products.append(product)
                     if len(final_products) >= num_items:
                         break
 
         return ProductRecResult(
             success=True,
             products=final_products[:num_items],
-            recall_strategy="rule_based+popularity",
-            data={"candidate_count": len(candidates), "reranked": len(ranked_ids)},
+            recall_strategy="rule_recall+llm_rerank",
+            data={
+                "candidate_count": len(candidates),
+                "reranked": len(ranked_ids),
+            },
             confidence=0.8,
         )
 
-    async def _recall(self, profile: UserProfile | None, limit: int) -> list[Product]:
-        """Rule-based candidate recall using user preferences and stock status."""
-
-        candidates = list(MOCK_PRODUCTS)
-        if profile and profile.preferred_categories:
-            preferred = set(profile.preferred_categories)
-            candidates.sort(
-                key=lambda p: (p.category in preferred, p.stock > 0, random.random()),
-                reverse=True,
-            )
-
-        return candidates[:limit]
+    def _load_candidates(self, limit: int) -> list[Product]:
+        """Load a deterministic candidate slice without ranking it."""
+        return list(MOCK_PRODUCTS)[:limit]
 
     async def _rerank(
-        self, profile: UserProfile | None, candidates: list[Product], num_items: int
+        self,
+        user_profile: UserProfile | None,
+        candidates: list[Product],
+        num_items: int,
     ) -> list[str]:
-        if not profile:
-            return [p.product_id for p in candidates[:num_items]]
+        """Use LLM ranking first; use deterministic fallback on failure."""
+        if not user_profile:
+            return self._fallback_rank(candidates, None, num_items)
 
-        profile_summary = {
-            "segments": [s.value for s in profile.segments],
-            "preferred_categories": profile.preferred_categories,
-            "price_range": list(profile.price_range),
-        }
-        candidate_summary = [
-            {"id": p.product_id, "name": p.name, "category": p.category, "price": p.price, "tags": p.tags}
-            for p in candidates
-        ]
-        prompt = RERANK_PROMPT.format(
-            num_items=num_items,
-            user_profile=json.dumps(profile_summary, ensure_ascii=False),
-            candidates=json.dumps(candidate_summary, ensure_ascii=False),
-        )
-        messages = [
-            SystemMessage(content="你是电商推荐排序专家。"),
-            HumanMessage(content=prompt),
-        ]
-        response = await self.llm.ainvoke(messages)
         try:
+            profile_summary = {
+                "segments": [s.value for s in user_profile.segments],
+                "preferred_categories": user_profile.preferred_categories,
+                "price_range": list(user_profile.price_range),
+            }
+            candidate_summary = [
+                {
+                    "id": p.product_id,
+                    "name": p.name,
+                    "category": p.category,
+                    "price": p.price,
+                    "tags": p.tags,
+                }
+                for p in candidates
+            ]
+            prompt = RERANK_PROMPT.format(
+                num_items=num_items,
+                user_profile=json.dumps(profile_summary, ensure_ascii=False),
+                candidates=json.dumps(candidate_summary, ensure_ascii=False),
+            )
+            messages = [
+                SystemMessage(content="你是电商推荐排序专家。"),
+                HumanMessage(content=prompt),
+            ]
+            response = await self.llm.ainvoke(messages)
+
             raw = response.content.strip()
             if raw.startswith("```"):
                 raw = raw.split("\n", 1)[1].rsplit("```", 1)[0]
-            return json.loads(raw)
-        except (json.JSONDecodeError, IndexError):
-            return [p.product_id for p in candidates[:num_items]]
 
+            ranked_ids = json.loads(raw)
+            if not isinstance(ranked_ids, list):
+                raise ValueError("LLM rerank output must be a JSON array")
+            return ranked_ids
+        except (json.JSONDecodeError, IndexError, TypeError, ValueError):
+            return self._fallback_rank(candidates, user_profile, num_items)
 
+    def _fallback_rank(
+        self,
+        candidates: list[Product],
+        user_profile: UserProfile | None,
+        num_items: int,
+    ) -> list[str]:
+        """Deterministic fallback used only when LLM ranking is unavailable."""
+        ordered = list(candidates)
+        ordered.sort(key=lambda p: p.product_id)
+
+        if user_profile and user_profile.preferred_categories:
+            preferred = set(user_profile.preferred_categories)
+            price_min, price_max = user_profile.price_range
+            ordered.sort(
+                key=lambda p: (
+                    p.category in preferred,
+                    p.stock > 0,
+                    price_min <= p.price <= price_max,
+                ),
+                reverse=True,
+            )
+
+        return [p.product_id for p in ordered[:num_items]]
