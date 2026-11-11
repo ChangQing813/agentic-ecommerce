@@ -1,215 +1,106 @@
-# Multi-Agent 电商推荐与营销系统（Python 版）
+# 多 Agent 电商推荐系统
 
-基于 **Python + FastAPI + LangGraph** 构建的多 Agent 电商推荐项目。系统将用户画像、商品推荐、库存决策和营销文案生成拆分为独立 Agent，通过 LangGraph 编排、异步并行和降级机制完成推荐链路。
+个人工程项目：使用 FastAPI、LangGraph、PostgreSQL、Redis 和 OpenAI-compatible 模型服务，完成行为驱动的商品推荐及后台文案生成。商品为示例数据，无真实交易系统；不宣称生产容量或业务提升。
 
-## 核心能力
+## 启动
 
-- **Multi-Agent 编排**：LangGraph + 4 个专业 Agent。
-- **异步并行执行**：画像与商品召回并行；库存过滤后，仅对可售商品执行 LLM 精排。
-- **稳定性治理**：统一超时、指数退避重试和 fallback 降级。
-- **推荐重排**：基于用户画像和候选商品执行 LLM 排序。
-- **营销文案生成**：按用户分群切换 Prompt 模板并执行敏感词过滤。
-- **A/B 实验**：一致性哈希分桶与 Thompson Sampling 动态分配。
-- **运行指标**：提供 Agent 调用次数、成功率和平均延迟查询。
+安装并启动 Docker Desktop（Linux 引擎），在项目根目录执行：
 
-## 系统架构
-
-```mermaid
-flowchart LR
-    C[Client] --> F[FastAPI]
-    F --> S[LangGraph]
-
-    subgraph P1[Phase 1]
-        U[User Profile Agent]
-        R[Product Rec Agent: Recall]
-    end
-
-    subgraph P2[Phase 2]
-        K[Product Rec Agent: LLM Rerank]
-        I[Inventory Agent: Filter]
-    end
-
-    S --> U
-    S --> R
-    U --> K
-    R --> I
-    I --> K
-    K --> A[Aggregate]
-    A --> M[Marketing Copy Agent]
-    M --> O[Recommendation Response]
+```cmd
+copy .env.example .env
 ```
 
-LangGraph 是唯一推荐编排链路，对外入口为 `/api/v1/recommend`。
+编辑根目录 `.env`，需要真实模型时填写密钥并开启开关。已有 `.env` 时不要覆盖。然后：
 
-## Agent 职责
-
-| Agent | 职责 | 主要输入 | 主要输出 |
-| --- | --- | --- | --- |
-| UserProfileAgent | RFM、分群与偏好分析 | 用户行为数据 | 用户画像 |
-| ProductRecAgent | 候选筛选与 LLM 重排 | 用户画像、商品列表 | 推荐商品 |
-| InventoryAgent | 可用库存校验、预警和限购 | 商品列表 | 可用商品及限购规则 |
-| MarketingCopyAgent | 分群文案生成与合规过滤 | 用户画像、商品列表 | 营销文案 |
-
-## 技术栈
-
-- Python 3.11+
-- FastAPI
-- LangGraph、LangChain
-- asyncio
-- Pydantic
-- Tenacity
-- MiniMax / OpenAI-Compatible LLM API
-- Redis FeatureStore（可选组件）
-- structlog
-- Docker Compose
-
-## 快速启动
-
-### 方式一：本地 Python + Docker Redis
-
-先启动 Redis：
-
-```bash
-docker compose up -d redis
-docker compose exec redis redis-cli ping
+```cmd
+docker compose up -d --build
 ```
 
-看到 `PONG` 后启动 API：
+- 演示页面：http://localhost:8000/
+- 接口测试：http://localhost:8000/docs
+- 存活检查：`GET /health`
+- 数据库就绪检查：`GET /ready`
+- Agent 指标：`GET /api/v1/metrics`
 
-```bash
-cd python
-python -m venv .venv
+Compose 自动等待数据库就绪，执行 `manage.py --seed`，再启动 API。重复启动不覆盖已有商品。停止使用 `docker compose stop`；不要删除数据卷以免丢失记录。
 
-# Windows PowerShell
-.venv\Scripts\Activate.ps1
+## 配置
 
-# macOS / Linux
-source .venv/bin/activate
+Compose 使用根目录 `.env`；本机运行 Python 时使用 `python/.env`。示例文件不保存真实密钥。
 
-pip install -r requirements.txt
-cp .env.example .env
-python main.py
+| 配置 | 用途 |
+|---|---|
+| ECOM_LLM_ENABLED | 是否启用真实模型，默认 false |
+| ECOM_LLM_API_KEY | 供应商模型密钥，仅后端使用 |
+| ECOM_LLM_BASE_URL / ECOM_LLM_MODEL | 供应商地址和模型 |
+| ECOM_API_KEY | 可选服务调用密钥，客户端传 X-API-Key；不是模型密钥 |
+| ECOM_MAX_ACTIVE_REQUESTS | 每进程推荐请求上限，默认 32 |
+| PIP_INDEX_URL | 构建依赖下载源，Compose 默认清华镜像 |
+
+模型开关关闭也能运行，精排使用规则，文案使用模板，响应明确标记降级。演示页服务密钥只保存在页面内存，不写入本地存储。
+
+## 推荐与行为
+
+```json
+{"user_id":"demo-user","scene":"homepage","num_items":5}
 ```
 
-本机运行 API 时，`.env` 中的 Redis 地址应为：
+向 `POST /api/v1/recommend` 提交上述请求。演示页可直接获取推荐、记录点击并展示 Agent 状态；不支持预算或自然语言需求。
 
-```text
-ECOM_REDIS_URL=redis://localhost:6379/0
+`POST /api/v1/behaviors` 支持 view、click、cart、purchase。新事件使用唯一 event_id；重试复用完整原始事件（包括 occurred_at）。首次写入 recorded、重复 duplicate、不同内容复用 ID 返回 409，未知商品返回 404。购买行为是测试输入，不是可信订单转化。
+
+## 唯一运行入口与代码结构
+
+- `python/main.py`：API、静态演示页及资源生命周期。
+- `python/services/multi_agent.py`：当前 LangGraph 编排及四个 Agent。
+- `repository.py`：商品、行为、初始迁移和连接池。
+- `copy_cache.py`：后台队列、文案校验、Redis 缓存。
+- `governance.py`：熔断、容量错误和聚合指标。
+- `recommendation.py`：独立规则基线，用于离线评测。
+- `python/agents/`、`python/orchestrator/`：历史参考实现，不是 API 入口。
+- `ab_test.py`、`metrics.py`：历史实验模块，未接入线上推荐。
+
+## 验证与评测
+
+本机 Python 3.11+，在根目录执行：
+
+```cmd
+py -3.11 -m venv .venv
+.venv\Scripts\python -m pip install -r python/requirements.txt
+.venv\Scripts\python -m unittest discover -s python/tests -t python
+.venv\Scripts\python python/tests/test_ab_test.py
+.venv\Scripts\python python/scripts/evaluate.py
 ```
 
-服务启动成功后会看到：
+评测写入 `reports/offline-evaluation.json`：30 条合成规则约束用例，不调用模型、不使用生产数据、不代表 CTR/CVR 或推荐相关性提升。
 
-```text
-feature_store.enabled
-app.startup
+HTTP 压测是显式操作，会产生真实模型费用。小样本仅验证脚本，不代表生产容量：
+
+```cmd
+.venv\Scripts\python python/scripts/benchmark.py --allow-model --requests 10 --concurrency 2
 ```
 
-如果 Redis 不可用，服务仍会启动，但会自动禁用 FeatureStore 并回退到 context/默认画像数据。
+服务开启鉴权时先设置环境变量 ECOM_API_KEY。输出 `reports/http-benchmark.json`，包含成功率、P50/P95/P99、拒绝及请求明细。不要将拒绝吞吐视为成功吞吐。真实规则/LLM 质量比较需固定候选、盲评标准及独立测试集，尚未完成。
 
-服务地址：
+自动检查定义在 `.github/workflows/checks.yml`；推送到 GitHub 后执行测试、规则评测、Compose 校验和镜像构建。本地通过不代表远程 CI 已运行。
 
-- API：`http://127.0.0.1:8000`
-- Swagger：`http://127.0.0.1:8000/docs`
-- 健康检查：`http://127.0.0.1:8000/health`
+## 故障与运行边界
 
-### 方式二：Docker Compose 启动 API + Redis
+请求预算 12 秒；节点使用更小的自身预算。模型并发每进程 8，最多两次传输尝试，仅暂时性错误重试。连续 5 次逻辑调用失败触发 30 秒熔断，半开只允许一个探测。推荐容量超限返回 429。
 
-```bash
-docker compose up --build
-```
+库存阶段重读数据库，失败时清空候选；候选白名单和严格 JSON schema 校验阻止模型新增商品或篡改价格。库存是数据库快照，交易仍需订单系统复查。
 
-该方式会同时启动 FastAPI API 和 Redis，不需要在宿主机单独运行 Python。API 容器使用的 Redis 地址为：
+新用户无类目偏好时跳过模型画像。文案读取缓存最多等待 50ms；未命中立即返回模板，后台队列容量 32、单 worker、单次尝试，后台等待最多 12 秒。成功缓存一小时，失败本地冷却 30 秒。任务不持久化、去重不跨实例。缓存只含公共商品信息。
 
-```text
-ECOM_REDIS_URL=redis://redis:6379/0
-```
+PostgreSQL 连接/语句超时 3 秒、锁等待/连接池等待 1 秒，池容量 8、不额外扩容。取消协程不能强制停止同步线程，数据库超时约束的是单条 SQL。每次全量读商品和近期事件仍需优化。
 
-## 环境变量
+尚无用户级授权、分布式限流、WMS、完整迁移升级、持久化监控告警或灰度系统。基础词表不能替代文案事实审核。confidence 是状态占位值，不是校准概率；experiment_group 的 control 是兼容字段，不代表真实在线实验。
 
-| 变量 | 说明 |
-| --- | --- |
-| `ECOM_LLM_API_KEY` | LLM API Key |
-| `ECOM_LLM_BASE_URL` | OpenAI-Compatible API 地址 |
-| `ECOM_LLM_MODEL` | 模型名称，默认 `qwen-max` |
-| `ECOM_REDIS_URL` | 可选 Redis 地址 |
-| `ECOM_AB_TEST_ENABLED` | 是否启用 A/B 实验 |
+详细见 [架构](docs/architecture.md)、[验收记录](docs/acceptance.md)、[面试说明](docs/interview.md)。
 
-## API
+## 排错
 
-| 方法 | 路径 | 说明 |
-| --- | --- | --- |
-| `GET` | `/health` | 健康检查 |
-| `POST` | `/api/v1/recommend` | LangGraph 推荐流程 |
-| `POST` | `/api/v1/behaviors` | 写入 Redis FeatureStore 用户行为 |
-| `GET` | `/api/v1/experiments` | 查询实验状态 |
-| `GET` | `/api/v1/metrics` | 查询 Agent 与业务指标 |
-| `POST` | `/api/v1/experiments/{experiment_id}/outcome` | 记录实验结果 |
-
-推荐请求示例：
-
-```bash
-curl -X POST "http://127.0.0.1:8000/api/v1/recommend" \
-  -H "Content-Type: application/json" \
-  -d '{"user_id":"u001","scene":"homepage","num_items":5}'
-```
-
-
-行为上报示例：
-
-```bash
-curl -X POST "http://127.0.0.1:8000/api/v1/behaviors" \
-  -H "Content-Type: application/json" \
-  -d '{"user_id":"u001","behavior_type":"view","item_id":"P001","metadata":{"category":"手机"}}'
-```
-
-## 核心实现指标
-
-以下数据可由代码和配置直接验证：
-
-| 项目 | 配置 |
-| --- | ---: |
-| 专业 Agent 数量 | 4 |
-| 异步编排阶段 | 2 |
-| 阶段内并行任务 | 画像与商品召回 |
-| 单个 Agent 最大重试次数 | 2 |
-| 用户画像 Agent 超时 | 5s |
-| 商品推荐 Agent 超时 | 8s |
-| 营销文案 Agent 超时 | 10s |
-| 库存 Agent 超时 | 5s |
-| A/B 分桶数量 | 100 |
-| 营销 Prompt 模板 | 5 |
-| 广告法敏感词规则 | 10 |
-| REST API 数量 | 6 |
-| A/B 单元测试 | 5 |
-
-## 项目结构
-
-```text
-.
-├── docker-compose.yml
-├── python
-│   ├── agents/                  # 4 个业务 Agent 与基础容错逻辑
-│   ├── config/                  # 应用配置
-│   ├── models/                  # Pydantic 数据结构
-│   ├── orchestrator/            # LangGraph 编排
-│   ├── services/                # A/B、FeatureStore 与指标组件
-│   ├── tests/                   # 单元测试
-│   ├── .env.example
-│   ├── Dockerfile
-│   ├── main.py                  # FastAPI 入口
-│   └── requirements.txt
-└── README.md
-```
-
-## 当前限制
-
-- 商品推荐当前基于 `MOCK_PRODUCTS` 示例数据，尚未接入真实商品库。
-- Redis `FeatureStore` 已接入用户画像链路；Redis 不可用时自动降级，不阻断推荐服务启动。
-- 库存判断基于请求中的商品库存字段，尚未接入 WMS 或数据库。
-- A/B 实验数据与指标当前保存在内存中，服务重启后会重置。
-- 当前没有 Milvus 向量检索、MCP、WMS、RAG 或 ReAct 的真实运行链路。
-- 仓库未提供 P99、QPS、CTR、CVR、GMV 等压测或线上实验数据，请勿将预期目标写成实测结果。
-
-## License
-
-MIT
+- 运行旧镜像：`docker compose up -d --build --force-recreate api`。
+- 日志：`docker compose logs --tail=100 api`。
+- 下载 SSL 中断：检查 Docker Desktop 代理。CMD 可用 `set PIP_INDEX_URL=https://pypi.org/simple` 切换源；不要关闭 TLS 校验。
+- 模板文案：检查 marketing_copy.data.decision，排队不是模型完成；cache_hit 表示缓存命中。

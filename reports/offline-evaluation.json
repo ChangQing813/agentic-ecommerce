@@ -1,0 +1,188 @@
+{
+  "mode": "synthetic-offline-rule",
+  "cases": [
+    {
+      "case": 0,
+      "expected_category": "phone",
+      "actual_category": "phone",
+      "passed": true
+    },
+    {
+      "case": 1,
+      "expected_category": "tablet",
+      "actual_category": "tablet",
+      "passed": true
+    },
+    {
+      "case": 2,
+      "expected_category": "phone",
+      "actual_category": "phone",
+      "passed": true
+    },
+    {
+      "case": 3,
+      "expected_category": "tablet",
+      "actual_category": "tablet",
+      "passed": true
+    },
+    {
+      "case": 4,
+      "expected_category": "phone",
+      "actual_category": "phone",
+      "passed": true
+    },
+    {
+      "case": 5,
+      "expected_category": "tablet",
+      "actual_category": "tablet",
+      "passed": true
+    },
+    {
+      "case": 6,
+      "expected_category": "phone",
+      "actual_category": "phone",
+      "passed": true
+    },
+    {
+      "case": 7,
+      "expected_category": "tablet",
+      "actual_category": "tablet",
+      "passed": true
+    },
+    {
+      "case": 8,
+      "expected_category": "phone",
+      "actual_category": "phone",
+      "passed": true
+    },
+    {
+      "case": 9,
+      "expected_category": "tablet",
+      "actual_category": "tablet",
+      "passed": true
+    },
+    {
+      "case": 10,
+      "expected_category": "phone",
+      "actual_category": "phone",
+      "passed": true
+    },
+    {
+      "case": 11,
+      "expected_category": "tablet",
+      "actual_category": "tablet",
+      "passed": true
+    },
+    {
+      "case": 12,
+      "expected_category": "phone",
+      "actual_category": "phone",
+      "passed": true
+    },
+    {
+      "case": 13,
+      "expected_category": "tablet",
+      "actual_category": "tablet",
+      "passed": true
+    },
+    {
+      "case": 14,
+      "expected_category": "phone",
+      "actual_category": "phone",
+      "passed": true
+    },
+    {
+      "case": 15,
+      "expected_category": "tablet",
+      "actual_category": "tablet",
+      "passed": true
+    },
+    {
+      "case": 16,
+      "expected_category": "phone",
+      "actual_category": "phone",
+      "passed": true
+    },
+    {
+      "case": 17,
+      "expected_category": "tablet",
+      "actual_category": "tablet",
+      "passed": true
+    },
+    {
+      "case": 18,
+      "expected_category": "phone",
+      "actual_category": "phone",
+      "passed": true
+    },
+    {
+      "case": 19,
+      "expected_category": "tablet",
+      "actual_category": "tablet",
+      "passed": true
+    },
+    {
+      "case": 20,
+      "expected_category": "phone",
+      "actual_category": "phone",
+      "passed": true
+    },
+    {
+      "case": 21,
+      "expected_category": "tablet",
+      "actual_category": "tablet",
+      "passed": true
+    },
+    {
+      "case": 22,
+      "expected_category": "phone",
+      "actual_category": "phone",
+      "passed": true
+    },
+    {
+      "case": 23,
+      "expected_category": "tablet",
+      "actual_category": "tablet",
+      "passed": true
+    },
+    {
+      "case": 24,
+      "expected_category": "phone",
+      "actual_category": "phone",
+      "passed": true
+    },
+    {
+      "case": 25,
+      "expected_category": "tablet",
+      "actual_category": "tablet",
+      "passed": true
+    },
+    {
+      "case": 26,
+      "expected_category": "phone",
+      "actual_category": "phone",
+      "passed": true
+    },
+    {
+      "case": 27,
+      "expected_category": "tablet",
+      "actual_category": "tablet",
+      "passed": true
+    },
+    {
+      "case": 28,
+      "expected_category": "phone",
+      "actual_category": "phone",
+      "passed": true
+    },
+    {
+      "case": 29,
+      "expected_category": "tablet",
+      "actual_category": "tablet",
+      "passed": true
+    }
+  ],
+  "passed": 30,
+  "total": 30,
+  "limitations": "Evaluates deterministic baseline constraints only. No live LLM, human relevance rating, CTR or CVR comparison."
+}

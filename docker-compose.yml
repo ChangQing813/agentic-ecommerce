@@ -1,28 +1,54 @@
 services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: ecom
+      POSTGRES_PASSWORD: ecom
+      POSTGRES_DB: ecom
+    ports: ["5432:5432"]
+    volumes: ["postgres_data:/var/lib/postgresql/data"]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ecom -d ecom"]
+      interval: 5s
+      timeout: 3s
+      retries: 15
+  redis:
+    image: redis:7-alpine
+    ports: ["6379:6379"]
+    volumes: ["redis_data:/data"]
+    command: redis-server --appendonly yes
+  migrate:
+    build:
+      context: ./python
+      args:
+        PIP_INDEX_URL: ${PIP_INDEX_URL:-https://pypi.tuna.tsinghua.edu.cn/simple}
+    command: python manage.py --seed
+    environment:
+      ECOM_DATABASE_URL: postgresql+psycopg://ecom:ecom@postgres:5432/ecom
+    depends_on:
+      postgres:
+        condition: service_healthy
   api:
     build:
       context: ./python
-      dockerfile: Dockerfile
-    ports:
-      - "8000:8000"
+      args:
+        PIP_INDEX_URL: ${PIP_INDEX_URL:-https://pypi.tuna.tsinghua.edu.cn/simple}
+    ports: ["8000:8000"]
     environment:
-      - ECOM_LLM_API_KEY=${ECOM_LLM_API_KEY:-your_api_key_here}
-      - ECOM_LLM_BASE_URL=${ECOM_LLM_BASE_URL:-https://dashscope.aliyuncs.com/compatible-mode/v1}
-      - ECOM_LLM_MODEL=${ECOM_LLM_MODEL:-qwen-max}
-      - ECOM_REDIS_URL=redis://redis:6379/0
+      ECOM_DATABASE_URL: postgresql+psycopg://ecom:ecom@postgres:5432/ecom
+      ECOM_REDIS_URL: redis://redis:6379/0
+      ECOM_MAX_ACTIVE_REQUESTS: ${ECOM_MAX_ACTIVE_REQUESTS:-32}
+      ECOM_LLM_ENABLED: ${ECOM_LLM_ENABLED:-false}
+      ECOM_LLM_API_KEY: ${ECOM_LLM_API_KEY:-}
+      ECOM_LLM_BASE_URL: ${ECOM_LLM_BASE_URL:-https://dashscope.aliyuncs.com/compatible-mode/v1}
+      ECOM_LLM_MODEL: ${ECOM_LLM_MODEL:-qwen-max}
+      ECOM_API_KEY: ${ECOM_API_KEY:-}
     depends_on:
-      - redis
+      migrate:
+        condition: service_completed_successfully
+      redis:
+        condition: service_started
     restart: unless-stopped
-
-  redis:
-    image: redis:7-alpine
-    ports:
-      - "6379:6379"
-    volumes:
-      - redis_data:/data
-    command: redis-server --appendonly yes
-    restart: unless-stopped
-
 volumes:
+  postgres_data:
   redis_data:
-

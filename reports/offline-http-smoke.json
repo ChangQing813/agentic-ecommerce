@@ -1,0 +1,81 @@
+{
+  "mode": "live-http",
+  "url": "http://127.0.0.1:8765",
+  "requests": 10,
+  "concurrency": 2,
+  "elapsed_seconds": 0.33348789997398853,
+  "throughput_including_rejections": 29.986095449879837,
+  "success_rate": 1.0,
+  "p50_ms": 62.679999973624945,
+  "p95_ms": 85.61370009556413,
+  "p99_ms": 85.61370009556413,
+  "results": [
+    {
+      "status": 200,
+      "latency_ms": 81.7601999733597,
+      "degraded": true,
+      "products": 5
+    },
+    {
+      "status": 200,
+      "latency_ms": 85.61370009556413,
+      "degraded": true,
+      "products": 5
+    },
+    {
+      "status": 200,
+      "latency_ms": 76.81929995305836,
+      "degraded": true,
+      "products": 5
+    },
+    {
+      "status": 200,
+      "latency_ms": 77.46050017885864,
+      "degraded": true,
+      "products": 5
+    },
+    {
+      "status": 200,
+      "latency_ms": 45.85830005817115,
+      "degraded": true,
+      "products": 5
+    },
+    {
+      "status": 200,
+      "latency_ms": 45.8509000018239,
+      "degraded": true,
+      "products": 5
+    },
+    {
+      "status": 200,
+      "latency_ms": 62.679999973624945,
+      "degraded": true,
+      "products": 5
+    },
+    {
+      "status": 200,
+      "latency_ms": 63.30189993605018,
+      "degraded": true,
+      "products": 5
+    },
+    {
+      "status": 200,
+      "latency_ms": 62.02470022253692,
+      "degraded": true,
+      "products": 5
+    },
+    {
+      "status": 200,
+      "latency_ms": 61.77080003544688,
+      "degraded": true,
+      "products": 5
+    }
+  ],
+  "limitations": "Small samples are smoke tests, not capacity evidence. 429 responses are counted separately from successes. No CTR/CVR claims.",
+  "environment": {
+    "model_enabled": false,
+    "database": "temporary SQLite",
+    "redis": "unavailable by design",
+    "purpose": "script smoke validation, not production capacity"
+  }
+}

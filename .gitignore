@@ -23,3 +23,17 @@ Thumbs.db
 
 # Runtime
 *.log
+
+.venv311/
+
+reports/*.db
+
+# Local secrets and database files
+.env-*
+.env.*
+!.env.example
+*.db
+*.db-shm
+*.db-wal
+*.sqlite
+*.sqlite3

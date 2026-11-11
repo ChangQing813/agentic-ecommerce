@@ -1,11 +1,22 @@
 from functools import lru_cache
 
+from pydantic import Field
 from pydantic_settings import BaseSettings
 
 
 class Settings(BaseSettings):
     app_name: str = "Multi-Agent E-Commerce System"
     debug: bool = False
+    database_url: str = "postgresql+psycopg://ecom:ecom@localhost:5432/ecom"
+    api_key: str = ""
+    cors_origins: list[str] = ["http://localhost:3000"]
+
+    max_active_requests: int = Field(default=32, ge=1, le=1024)
+    recommendation_timeout: float = Field(default=12.0, gt=0, le=60)
+    llm_enabled: bool = False
+    llm_max_concurrency: int = Field(default=8, ge=1, le=128)
+    marketing_wait_budget: float = Field(default=2.0, gt=0, le=10)
+    llm_call_timeout: float = 3.0
 
     # LLM
     llm_api_key: str = ""
